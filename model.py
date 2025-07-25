@@ -13,14 +13,6 @@ from model_gcn import GCN
 #     [0.5, 0.9, 0.5, 0.8, 0.6, 1.0]   # frustrated
 # ], dtype=torch.float32)
 
-iemocap_similarity_matrix = torch.tensor([
-    [1.0, 0.3, 0.4, 0.2, 0.6, 0.3],  # happy
-    [0.3, 1.0, 0.4, 0.7, 0.4, 0.6],  # sad
-    [0.2, 0.5, 1.0, 0.4, 0.5, 0.2],  # neutral
-    [0.2, 0.7, 0.4, 1.0, 0.3, 0.5],  # angry
-    [0.6, 0.4, 0.5, 0.3, 1.0, 0.4],  # excited
-    [0.3, 0.8, 0.3, 0.5, 0.4, 1.0]   # frustrated
-], dtype=torch.float32)
 
 class SimilarityAwareFocalLoss(nn.Module):
     def __init__(self, gamma=2.0, alpha=0.25, size_average=True):
@@ -144,13 +136,6 @@ class PositionwiseFeedForward(nn.Module):
         self.dropout_1 = nn.Dropout(dropout)
         self.dropout_2 = nn.Dropout(dropout)
 
-    def forward(self, x):
-        # Apply layer norm, then linear projection w_1, then GELU, then dropout
-        inter = self.dropout_1(self.actv(self.w_1(self.layer_norm(x))))
-        # Project intermediate result back to d_model, then dropout
-        output = self.dropout_2(self.w_2(inter))
-        # Add residual connection and return
-        return output + x
 
 
 class MultiHeadedAttention(nn.Module):
@@ -166,22 +151,7 @@ class MultiHeadedAttention(nn.Module):
         # Ensure model_dim is divisible by head_count as required by multi-head attention
         assert model_dim % head_count == 0
         # Compute dimension per head
-        self.dim_per_head = model_dim // head_count
-        self.model_dim = model_dim
 
-        super(MultiHeadedAttention, self).__init__()
-        self.head_count = head_count
-
-        # Linear layers to transform key, value, and query
-        self.linear_k = nn.Linear(model_dim, head_count * self.dim_per_head)
-        self.linear_v = nn.Linear(model_dim, head_count * self.dim_per_head)
-        self.linear_q = nn.Linear(model_dim, head_count * self.dim_per_head)
-        # Softmax layer for attention weights
-        self.softmax = nn.Softmax(dim=-1)
-        # Dropout layer for regularization
-        self.dropout = nn.Dropout(dropout)
-        # Linear layer to combine multi-head outputs back to model_dim
-        self.linear = nn.Linear(model_dim, model_dim)
 
     def forward(self, key, value, query, mask=None):
         batch_size = key.size(0)
@@ -206,18 +176,7 @@ class MultiHeadedAttention(nn.Module):
         # Calculate attention scores via dot product of query and key
         scores = torch.matmul(query, key.transpose(2, 3))
 
-        if mask is not None:
-            mask = mask.unsqueeze(1).expand_as(scores)
-            scores = scores.masked_fill(mask, -1e10)
 
-        # Calculate attention weights
-        attn = self.softmax(scores)
-        drop_attn = self.dropout(attn)
-        # Compute weighted sum of values to get context vectors
-        context = torch.matmul(drop_attn, value).transpose(1, 2).contiguous().view(batch_size, -1, head_count * dim_per_head)
-        # Final linear layer
-        output = self.linear(context)
-        return output
 
 
 class PositionalEncoding(nn.Module):
@@ -306,29 +265,6 @@ class TransformerEncoderLayer(nn.Module):
         return self.feed_forward(out)
 
 
-class TransformerEncoder(nn.Module):
-    """This class implements the Transformer encoder, composed of multiple TransformerEncoderLayer layers,
-    along with positional encoding and dropout."""
-    def __init__(self, d_model, d_ff, heads, layers, dropout=0.1):
-        """
-        :param d_model: Feature dimension of the model
-        :param d_ff: Hidden dimension of feed-forward network
-        :param heads: Number of attention heads
-        :param layers: Number of encoder layers
-        :param dropout: Dropout rate
-        """
-        super(TransformerEncoder, self).__init__()
-        # Save model feature dimension and number of layers
-        self.d_model = d_model
-        self.layers = layers
-        # Positional encoding for input sequences
-        self.pos_emb = PositionalEncoding(d_model)
-        # Create a ModuleList containing 'layers' TransformerEncoderLayer instances
-        self.transformer_inter = nn.ModuleList(
-            [TransformerEncoderLayer(d_model, heads, d_ff, dropout)
-             for _ in range(layers)])
-        self.dropout = nn.Dropout(dropout)
-
     def forward(self, x_a, x_b, mask, speaker_emb):
         # Check if x_a and x_b are equal. If yes, they represent different views of same input,
         # typical in Transformer decoders where x_b is encoder output
@@ -351,37 +287,7 @@ class TransformerEncoder(nn.Module):
                 # For each encoder layer, pass both x_a and x_b as inputs with mask
                 x_b = self.transformer_inter[i](i, x_a, x_b, mask.eq(0))
         return x_b
-
-
-class Unimodal_GatedFusion(nn.Module):
-    def __init__(self, hidden_size, dataset):
-        super().__init__()
-        self.gate = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
-            nn.Sigmoid()
-        )
-        if dataset == 'MELD':
-            # Initialize weights to identity matrix
-            self.fc.weight.data.copy_(torch.eye(hidden_size, hidden_size))
-            # Freeze weights so they are not updated during training
-            self.fc.weight.requires_grad = False
-
-    def forward(self, x):
-        gate = self.gate(x)
-        out = gate * x
-        return out
-
-
-def simple_batch_graphify(features, lengths, no_cuda):
-    node_features = []
-    batch_size = features.size(1)
-    for j in range(batch_size):
-        node_features.append(features[:lengths[j], j, :])
-
-    node_features = torch.cat(node_features, dim=0)
-
-    if not no_cuda:
-        node_features = node_features.to("cuda:0")
+da:0")
     return node_features
 
 
@@ -428,35 +334,7 @@ class Transformer_Based_Model(nn.Module):
         # Three 1D conv layers transform input features of different modalities to model hidden dimension
         self.textf_input = nn.Conv1d(D_text, hidden_dim, kernel_size=1, padding=0, bias=False)
         self.acouf_input = nn.Conv1d(D_audio, hidden_dim, kernel_size=1, padding=0, bias=False)
-        self.visuf_input = nn.Conv1d(D_visual, hidden_dim, kernel_size=1, padding=0, bias=False)
 
-        # Intra- and Inter-modal Transformers
-        # Multiple TransformerEncoder instances to handle intra- and inter-modal features
-        self.a_t = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-        self.v_t = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-        self.t_t = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-
-        self.a_a = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-        self.t_a = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-        self.v_a = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-
-        self.v_v = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-        self.t_v = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-        self.a_v = TransformerEncoder(d_model=hidden_dim, d_ff=hidden_dim, heads=n_head, layers=1, dropout=dropout)
-
-        # Unimodal-level Gated Fusion
-        # Multiple Unimodal_GatedFusion instances for gated fusion at unimodal level
-        self.t_t_gate = Unimodal_GatedFusion(hidden_dim, dataset)
-        self.a_t_gate = Unimodal_GatedFusion(hidden_dim, dataset)
-        self.v_t_gate = Unimodal_GatedFusion(hidden_dim, dataset)
-
-        self.a_a_gate = Unimodal_GatedFusion(hidden_dim, dataset)
-        self.t_a_gate = Unimodal_GatedFusion(hidden_dim, dataset)
-        self.v_a_gate = Unimodal_GatedFusion(hidden_dim, dataset)
-
-        self.v_v_gate = Unimodal_GatedFusion(hidden_dim, dataset)
-        self.t_v_gate = Unimodal_GatedFusion(hidden_dim, dataset)
-        self.a_v_gate = Unimodal_GatedFusion(hidden_dim, dataset)
 
         # Three linear layers to reduce dimensions of fused or concatenated unimodal features
         self.features_reduce_t = nn.Linear(3 * hidden_dim, hidden_dim)
@@ -536,31 +414,14 @@ class Transformer_Based_Model(nn.Module):
         t_v_transformer_out = self.t_v(textf, visuf, u_mask, spk_embeddings)
         a_v_transformer_out = self.a_v(acouf, visuf, u_mask, spk_embeddings)
 
-        # Unimodal-level Gated Fusion: reduce dimension of fused unimodal features
-        t_t_transformer_out = self.t_t_gate(t_t_transformer_out)
-        a_t_transformer_out = self.a_t_gate(a_t_transformer_out)
-        v_t_transformer_out = self.v_t_gate(v_t_transformer_out)
-        features_l = torch.cat([t_t_transformer_out, a_t_transformer_out, v_t_transformer_out])
 
-        a_a_transformer_out = self.a_a_gate(a_a_transformer_out)
-        t_a_transformer_out = self.t_a_gate(t_a_transformer_out)
-        v_a_transformer_out = self.v_a_gate(v_a_transformer_out)
-        features_a = torch.cat([a_a_transformer_out, t_a_transformer_out, v_a_transformer_out])
-
-        v_v_transformer_out = self.v_v_gate(v_v_transformer_out)
-        t_v_transformer_out = self.t_v_gate(t_v_transformer_out)
-        a_v_transformer_out = self.a_v_gate(a_v_transformer_out)
-        features_v = torch.cat([v_v_transformer_out, t_v_transformer_out, a_v_transformer_out])
 
         # Gated fusion of Transformer encoder outputs from different modalities
         t_transformer_out = self.features_reduce_t(torch.cat([t_t_transformer_out, a_t_transformer_out, v_t_transformer_out], dim=-1))
         a_transformer_out = self.features_reduce_a(torch.cat([a_a_transformer_out, t_a_transformer_out, v_a_transformer_out], dim=-1))
         v_transformer_out = self.features_reduce_v(torch.cat([v_v_transformer_out, t_v_transformer_out, a_v_transformer_out], dim=-1))
 
-        # Prepare features for graph model
-        features_a = simple_batch_graphify(a_transformer_out.permute(1, 0, 2), dia_len, False)
-        features_v = simple_batch_graphify(v_transformer_out.permute(1, 0, 2), dia_len, False)
-        features_l = simple_batch_graphify(t_transformer_out.permute(1, 0, 2), dia_len, False)
+
 
         # Graph model computes final multimodal features
         emotions_feat = self.graph_model(features_a, features_v, features_l, dia_len, qmask, epoch)
@@ -586,13 +447,7 @@ class Transformer_Based_Model(nn.Module):
         all_log_prob = F.log_softmax(all_final_out, 2)
         all_prob = F.softmax(all_final_out, 2)
 
-        # Temperature-scaled probabilities for knowledge distillation or regularization
-        kl_t_log_prob = F.log_softmax(t_final_out / self.temp, 2)
-        kl_a_log_prob = F.log_softmax(a_final_out / self.temp, 2)
-        kl_v_log_prob = F.log_softmax(v_final_out / self.temp, 2)
-        kl_t_log_prob_1 = F.log_softmax(t_final_out_1 / self.temp, 1)
-        kl_a_log_prob_1 = F.log_softmax(a_final_out_1 / self.temp, 1)
-        kl_v_log_prob_1 = F.log_softmax(v_final_out_1 / self.temp, 1)
+
 
         kl_all_prob = F.softmax(all_final_out / self.temp, 2)
         kl_all_prob_1 = F.softmax(self.smax_fc(emotions_feat) / self.temp, 1)
