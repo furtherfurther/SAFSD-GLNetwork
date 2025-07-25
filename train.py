@@ -27,41 +27,6 @@ def get_train_valid_sampler(trainset, valid=0.1, dataset='MELD'):
     return SubsetRandomSampler(idx[split:]), SubsetRandomSampler(idx[:split])
 
 
-def get_MELD_loaders(batch_size=32, valid=0.1, num_workers=0, pin_memory=False):
-    """
-    Create train, validation, and test DataLoaders for the MELD dataset.
-    These loaders use the DataLoader class and support parameters like batch size,
-    number of worker processes, and pin_memory.
-
-    :param num_workers: Number of subprocesses used to load data (default 0)
-    :param pin_memory: Whether to pin memory for faster CUDA transfer (default False)
-    :return: Tuple containing train_loader, valid_loader, and test_loader
-    """
-    trainset = MELDDataset('data/meld_multimodal_features.pkl')
-    train_sampler, valid_sampler = get_train_valid_sampler(trainset, valid, 'MELD')
-    # Create train DataLoader with specified batch size, sampler, collate function, etc.
-    train_loader = DataLoader(trainset,
-                              batch_size=batch_size,
-                              sampler=train_sampler,
-                              collate_fn=trainset.collate_fn,
-                              num_workers=num_workers,
-                              pin_memory=pin_memory)
-    valid_loader = DataLoader(trainset,
-                              batch_size=batch_size,
-                              sampler=valid_sampler,
-                              collate_fn=trainset.collate_fn,
-                              num_workers=num_workers,
-                              pin_memory=pin_memory)
-
-    testset = MELDDataset('data/meld_multimodal_features.pkl', train=False)
-    test_loader = DataLoader(testset,
-                             batch_size=batch_size,
-                             collate_fn=testset.collate_fn,
-                             num_workers=num_workers,
-                             pin_memory=pin_memory)
-    # Return a tuple of train, validation and test loaders
-    return train_loader, valid_loader, test_loader
-
 
 def get_IEMOCAP_loaders(batch_size=32, valid=0.1, num_workers=0, pin_memory=False):
     trainset = IEMOCAPDataset()
@@ -135,13 +100,7 @@ def train_or_eval_model(model, loss_function, kl_loss, dataloader, epoch, optimi
         kl_lp_3 = kl_log_prob3.view(-1, kl_log_prob3.size()[1])
         kl_p_all = kl_all_prob.view(-1, kl_all_prob.size()[1])
 
-        # Define loss weights tensor (adjust as needed)
-        loss_weights = torch.FloatTensor([1 / 0.086747,
-                                          1 / 0.144406,
-                                          1 / 0.227883,
-                                          1 / 0.160585,
-                                          1 / 0.127711,
-                                          1 / 0.252668])
+       
 
         # Instantiate loss functions; move to device if CUDA is used
         loss_function_1 = nn.NLLLoss(loss_weights.to(torch.device("cuda:0")) if cuda else loss_weights)  # For IEMOCAP
@@ -155,9 +114,7 @@ def train_or_eval_model(model, loss_function, kl_loss, dataloader, epoch, optimi
                gamma_2 * (loss_function_g(lp_1, labels_) + loss_function_g(lp_2, labels_) + loss_function_g(lp_3, labels_)) + \
                gamma_3 * (kl_loss(kl_lp_1, kl_p_all) + kl_loss(kl_lp_2, kl_p_all) + kl_loss(kl_lp_3, kl_p_all))
 
-        # Flatten probabilities and get predicted labels
-        lp_ = all_prob.view(-1, all_prob.size()[1])
-        pred_ = torch.argmax(lp_, 1)
+     
 
         # Append results for evaluation
         preds.append(pred_.data.cpu().numpy())
@@ -327,37 +284,4 @@ if __name__ == '__main__':
     print('F1-Score: {}'.format(max(all_fscore)))
     # print('ACC: {}'.format(max(all_acc)))
     print('index: {}'.format(all_fscore.index(max(all_fscore)) + 1))
-
-    # 4. Record model performance metrics to a file for later analysis and comparison, using Python's pickle module.
-    # Check if the record file for today's date exists
-    if not os.path.exists("record_{}_{}_{}.pk".format(today.year, today.month, today.day)):
-        # If file does not exist, open it in write-binary mode
-        with open("record_{}_{}_{}.pk".format(today.year, today.month, today.day),'wb') as f:
-            # Serialize an empty dictionary to the file
-            pk.dump({}, f)
-    # Open the file in read-binary mode
-    with open("record_{}_{}_{}.pk".format(today.year, today.month, today.day), 'rb') as f:
-        record = pk.load(f)
-
-    # Define a key for storing data in the record dictionary
-    key_ = 'name_'
-    if record.get(key_, False):
-        # If key exists, append the highest F-Score to the corresponding list
-        record[key_].append(max(all_fscore))
-    else:
-        # If key does not exist, create a new list and add the highest F-Score
-        record[key_] = [max(all_fscore)]
-
-    if record.get(key_+'record', False):
-        # If key exists, append the classification report to the corresponding list
-        # record[key_+'record'].append(classification_report(best_label, best_pred, sample_weight=best_mask,digits=4))
-        record[key_ + 'record'].append(classification_report(best_label, best_pred, digits=4))
-    else:
-        # If key does not exist, create a new list and add the classification report
-        # record[key_+'record'] = [classification_report(best_label, best_pred, sample_weight=best_mask,digits=4)]
-        record[key_ + 'record'] = [classification_report(best_label, best_pred, digits=4)]
-    # Open the file again in write-binary mode
-    with open("record_{}_{}_{}.pk".format(today.year, today.month, today.day),'wb') as f:
-        # Serialize the updated record dictionary back to the file
-        pk.dump(record, f)
 
