@@ -44,26 +44,6 @@ class GraphConvolution(nn.Module):
         stdv = 1. / math.sqrt(self.out_features)
         self.weight.data.uniform_(-stdv, stdv)
 
-    def forward(self, input, adj, h0, lamda, alpha, l):
-        """
-            Parameters:
-                - input: Input feature matrix (N x in_features)
-                - adj: Adjacency matrix of the graph (N x N), can be sparse
-                - h0: Initial node features (N x in_features)
-                - lamda: Regularization parameter
-                - alpha: Balancing coefficient to mix neighbor information and original features
-                - l: Another parameter used to compute `theta`
-
-            Returns:
-                - output: Output feature matrix after graph convolution (N x out_features)
-        """
-        # Compute theta to balance neighbor info and original info
-        theta = math.log(lamda / l + 1)
-        # Compute weighted features from neighbor nodes (core of convolution)
-        hi = torch.spmm(adj, input)  # Sparse matrix multiplication with adjacency matrix
-     
-        return output
-
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
@@ -103,39 +83,6 @@ class GCN(nn.Module):
         self.fc1 = nn.Linear(n_dim, nhidden)  # Mapping from input dimension to hidden layer
 
 
-
-    def forward(self, a, v, l, dia_len, qmask, epoch):
-        qmask = torch.cat([qmask[:x, i, :] for i, x in enumerate(dia_len)], dim=0)
-        spk_idx = torch.argmax(qmask, dim=-1)  # Get speaker indices
-        spk_emb_vector = self.speaker_embeddings(spk_idx)  # Get speaker embedding vectors
-        # Add speaker embeddings to language modality if enabled
-        if self.use_speaker:
-            if 'l' in self.modals:
-                l += spk_emb_vector
-        # Add positional encoding to each modality if enabled
-        if self.use_position:
-            if 'l' in self.modals:
-                l = self.l_pos(l, dia_len)
-            if 'a' in self.modals:
-                a = self.a_pos(a, dia_len)
-            if 'v' in self.modals:
-                v = self.v_pos(v, dia_len)
-        
-
-        # Create adjacency matrix and features needed for graph convolution
-        gnn_edge_index, gnn_features = self.create_gnn_index(a, v, l, dia_len, self.modals)
-        x1 = self.fc1(gnn_features)
-        out = x1
-        gnn_out = x1
-        # Apply multiple graph convolution layers
-        for kk in range(self.num_K):
-            gnn_out = gnn_out + getattr(self, 'conv%d' % (kk + 1))(gnn_out, gnn_edge_index)
-        # Concatenate convolution result with initial output
-        out2 = torch.cat([out, gnn_out], dim=1)
-        if self.use_residue:
-            out2 = torch.cat([gnn_features, out2], dim=-1)
-        # Reverse features and return
-        out1 = self.reverse_features(dia_len, out2)
 
         return out1
 
