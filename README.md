@@ -1,7 +1,7 @@
 # A Global-Local Fusion Network with Similarity-Aware Focal Self-Distillation for Multimodal Emotion Recognition in Conversations
 
 ## 🙏 Attention
-Our full code will be released after the acception.
+We have released part of the source code and will open-source the full implementation upon paper acceptance.
 
 ## 🛠️ Setup
 
