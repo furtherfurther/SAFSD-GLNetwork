@@ -4,48 +4,7 @@ import torch.nn.functional as F
 import math
 from model_gcn import GCN
 
-# iemocap_similarity_matrix = torch.tensor([
-#     [1.0, 0.3, 0.5, 0.2, 0.8, 0.5],  # happy
-#     [0.3, 1.0, 0.6, 0.7, 0.4, 0.9],  # sad
-#     [0.5, 0.6, 1.0, 0.4, 0.5, 0.5],  # neutral
-#     [0.2, 0.7, 0.4, 1.0, 0.3, 0.8],  # angry
-#     [0.8, 0.4, 0.5, 0.3, 1.0, 0.6],  # excited
-#     [0.5, 0.9, 0.5, 0.8, 0.6, 1.0]   # frustrated
-# ], dtype=torch.float32)
 
-
-class SimilarityAwareFocalLoss(nn.Module):
-    def __init__(self, gamma=2.0, alpha=0.25, size_average=True):
-        super(SimilarityAwareFocalLoss, self).__init__()
-        self.gamma = gamma
-        # self.alpha = alpha
-        self.alpha = torch.tensor([0.1807,0.1707,0.1585,0.1667,0.1725,0.1506]).cuda()  # Set according to class frequencies
-        self.size_average = size_average
-
-    def forward(self, logits, labels, similarity_matrix=iemocap_similarity_matrix):
-        """
-        :param logits: Model predictions
-        :param labels: Ground truth labels
-        :param similarity_matrix: Similarity matrix between classes
-        """
-        similarity_matrix = similarity_matrix.to(labels.device)
-        labels = labels.view(-1)
-        label_onehot = torch.zeros(logits.size(0), logits.size(1)).to(logits.device).scatter_(1, labels.unsqueeze(1), 1)
-
-        log_p = F.log_softmax(logits, dim=-1)
-        pt = torch.exp(log_p)
-        sub_pt = 1 - pt
-
-        # Similarity-based weighting
-        similarity_weights = similarity_matrix[labels]  # Get weights from similarity matrix for each label
-
-        # Compute Focal Loss with similarity weights
-        focal_loss = -self.alpha * (sub_pt ** self.gamma) * log_p * similarity_weights.unsqueeze(1)
-
-        if self.size_average:
-            return focal_loss.mean()
-        else:
-            return focal_loss.sum()
 
 
 class KLDivLoss(nn.Module):
@@ -63,42 +22,7 @@ class KLDivLoss(nn.Module):
         return loss
 
 
-class FocalLoss(nn.Module):
-    def __init__(self, gamma=2.5, alpha=1, size_average=True):
-        super(FocalLoss, self).__init__()
-        self.gamma = gamma
-        self.alpha = alpha
-        self.size_average = size_average
-        self.elipson = 0.000001
 
-    def forward(self, logits, labels):
-        """
-        Calculates loss
-        logits: batch_size * labels_length * seq_length
-        labels: batch_size * seq_length
-        """
-        if labels.dim() > 2:
-            labels = labels.contiguous().view(labels.size(0), labels.size(1), -1)
-            labels = labels.transpose(1, 2)
-            labels = labels.contiguous().view(-1, labels.size(2)).squeeze()
-        if logits.dim() > 3:
-            logits = logits.contiguous().view(logits.size(0), logits.size(1), logits.size(2), -1)
-            logits = logits.transpose(2, 3)
-            logits = logits.contiguous().view(-1, logits.size(1), logits.size(3)).squeeze()
-        labels_length = logits.size(1)
-        seq_length = logits.size(0)
-
-        new_label = labels.unsqueeze(1)
-        label_onehot = torch.zeros([seq_length, labels_length]).cuda().scatter_(1, new_label, 1)
-
-        log_p = F.log_softmax(logits, -1)
-        pt = label_onehot * log_p
-        sub_pt = 1 - pt
-        fl = -self.alpha * (sub_pt) ** self.gamma * log_p
-        if self.size_average:
-            return fl.mean()
-        else:
-            return fl.sum()
 
 
 def gelu(x):
@@ -397,30 +321,6 @@ class Transformer_Based_Model(nn.Module):
         textf = self.textf_input(textf.permute(1, 2, 0)).transpose(1, 2)
         acouf = self.acouf_input(acouf.permute(1, 2, 0)).transpose(1, 2)
         visuf = self.visuf_input(visuf.permute(1, 2, 0)).transpose(1, 2)
-
-        # Intra- and Inter-modal Transformers: encode modality features
-        # The following three variables represent "intra" Transformer encoder outputs for text, audio, visual modalities
-        t_t_transformer_out = self.t_t(textf, textf, u_mask, spk_embeddings)
-        a_t_transformer_out = self.a_t(acouf, textf, u_mask, spk_embeddings)
-        v_t_transformer_out = self.v_t(visuf, textf, u_mask, spk_embeddings)
-
-        # Inter-modal Transformer encoder outputs
-        a_a_transformer_out = self.a_a(acouf, acouf, u_mask, spk_embeddings)
-        t_a_transformer_out = self.t_a(textf, acouf, u_mask, spk_embeddings)
-        v_a_transformer_out = self.v_a(visuf, acouf, u_mask, spk_embeddings)
-
-        # Interactions between visual-text, audio-text, audio-visual modalities
-        v_v_transformer_out = self.v_v(visuf, visuf, u_mask, spk_embeddings)
-        t_v_transformer_out = self.t_v(textf, visuf, u_mask, spk_embeddings)
-        a_v_transformer_out = self.a_v(acouf, visuf, u_mask, spk_embeddings)
-
-
-
-        # Gated fusion of Transformer encoder outputs from different modalities
-        t_transformer_out = self.features_reduce_t(torch.cat([t_t_transformer_out, a_t_transformer_out, v_t_transformer_out], dim=-1))
-        a_transformer_out = self.features_reduce_a(torch.cat([a_a_transformer_out, t_a_transformer_out, v_a_transformer_out], dim=-1))
-        v_transformer_out = self.features_reduce_v(torch.cat([v_v_transformer_out, t_v_transformer_out, a_v_transformer_out], dim=-1))
-
 
 
         # Graph model computes final multimodal features
