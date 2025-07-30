@@ -1,8 +1,5 @@
 # A Global-Local Fusion Network with Similarity-Aware Focal Self-Distillation for Multimodal Emotion Recognition in Conversations
 
-## 🙏 Attention
-We have released part of the source code and will open-source the full implementation upon paper acceptance.
-
 ## 🛠️ Setup
 
 ### Preparing the Code and Data
@@ -19,5 +16,6 @@ conda activate SAFSD-GLNet
 
 pip install -r requirements.txt
 ```
-
+## 🙏 Attention
+We have released part of the source code and will open-source the full implementation upon paper acceptance.
 
